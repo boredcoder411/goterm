@@ -51,7 +51,7 @@ func main() {
 	defer renderer.Destroy()
 
 	// Load font
-	fontPath := "/home/dev/nerd_font.ttf"
+	fontPath := "nerd_font.ttf"
 	font, err := ttf.OpenFont(fontPath, 14)
 	if err != nil {
 		log.Fatalf("Could not load font: %v", err)

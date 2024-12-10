@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"time"
+  "fmt"
 
 	"github.com/creack/pty"
 	"github.com/veandco/go-sdl2/sdl"
@@ -17,9 +18,15 @@ const (
 	frameDelay   = 16 // ~60 FPS (1000ms / 60)
 )
 
-type Cursor struct {
-	X, Y int
-}
+var (
+	outputBuffer []string
+	cursorX      int32
+	cursorY      int32
+	charWidth    int32 = 8  // Adjust based on your font
+	charHeight   int32 = 16 // Adjust based on your font
+)
+
+// Initialize the buffer with an empty first line
 
 func main() {
 	// Initialize SDL
@@ -95,12 +102,15 @@ func main() {
 				log.Fatalf("Error reading from PTY: %v", err)
 			}
 			output := string(buf[:n])
+      fmt.Println([]byte(buf[:n]))
 			outputBuffer = append(outputBuffer, output)
 		}
 	}()
 
 	// Game loop
 	running := true
+
+	// Game loop rendering output
 	for running {
 		select {
 		case <-quit:
@@ -110,8 +120,8 @@ func main() {
 			renderer.SetDrawColor(0, 0, 0, 255) // Clear with black
 			renderer.Clear()
 
-			// Render PTY output
-			y := 0
+			// Render PTY output line by line
+			y := int32(0)
 			for _, line := range outputBuffer {
 				textSurface, err := font.RenderUTF8Solid(line, sdl.Color{R: 255, G: 255, B: 255, A: 255})
 				if err != nil {
@@ -127,7 +137,8 @@ func main() {
 				}
 				defer textTexture.Destroy()
 
-				renderer.Copy(textTexture, nil, &sdl.Rect{X: 0, Y: int32(y), W: textSurface.W, H: textSurface.H})
+				renderer.Copy(textTexture, nil, &sdl.Rect{X: 0, Y: y, W: textSurface.W, H: textSurface.H})
+				y += charHeight
 			}
 
 			renderer.Present()
@@ -136,9 +147,43 @@ func main() {
 	}
 }
 
+// Handle keyboard events
 func handleKeyboardEvent(e *sdl.KeyboardEvent, p *os.File) {
 	if e.Type == sdl.KEYDOWN {
 		char := e.Keysym.Sym
+
+		// Handle special keys like Enter and Backspace
+		switch char {
+		case sdl.K_RETURN:
+			outputBuffer = append(outputBuffer, "")
+			cursorX = 0
+			cursorY += charHeight
+		case sdl.K_BACKSPACE:
+			if len(outputBuffer) > 0 && cursorX > 0 {
+				currentLine := outputBuffer[len(outputBuffer)-1]
+				if len(currentLine) > 0 {
+					outputBuffer[len(outputBuffer)-1] = currentLine[:len(currentLine)-1]
+					cursorX -= charWidth
+				}
+			}
+		default:
+			// Append printable characters
+			if len(outputBuffer) == 0 {
+				outputBuffer = append(outputBuffer, "")
+			}
+			lastLine := outputBuffer[len(outputBuffer)-1]
+			outputBuffer[len(outputBuffer)-1] = lastLine + string(char)
+			cursorX += charWidth
+
+			// Wrap to a new line if needed
+			if cursorX >= screenWidth {
+				outputBuffer = append(outputBuffer, "")
+				cursorX = 0
+				cursorY += charHeight
+			}
+		}
+
+		// Write the character to the PTY
 		p.Write([]byte{byte(char)})
 	}
 }

@@ -4,8 +4,6 @@ import (
 	"log"
 	"os"
 	"os/exec"
-	"time"
-	//"fmt"
 	"strings"
 
 	"github.com/creack/pty"
@@ -23,14 +21,11 @@ var (
 	outputBuffer []string
 	cursorX      int32
 	cursorY      int32
-	charWidth    int32 = 8  // Adjust based on your font
-	charHeight   int32 = 16 // Adjust based on your font
+	charWidth    int32 = 8
+	charHeight   int32 = 16
 )
 
-// Initialize the buffer with an empty first line
-
 func main() {
-	// Initialize SDL
 	if err := sdl.Init(sdl.INIT_EVERYTHING); err != nil {
 		log.Fatalf("Could not initialize SDL: %v", err)
 	}
@@ -42,15 +37,13 @@ func main() {
 	}
 	defer ttf.Quit()
 
-	// Create window
-	window, err := sdl.CreateWindow("SDL2 Frame-Based Text Rendering", sdl.WINDOWPOS_UNDEFINED, sdl.WINDOWPOS_UNDEFINED,
+	window, err := sdl.CreateWindow("SDL2 Text Input Example", sdl.WINDOWPOS_UNDEFINED, sdl.WINDOWPOS_UNDEFINED,
 		screenWidth, screenHeight, sdl.WINDOW_SHOWN)
 	if err != nil {
 		log.Fatalf("Could not create window: %v", err)
 	}
 	defer window.Destroy()
 
-	// Create renderer
 	renderer, err := sdl.CreateRenderer(window, -1, sdl.RENDERER_ACCELERATED)
 	if err != nil {
 		log.Fatalf("Could not create renderer: %v", err)
@@ -58,41 +51,26 @@ func main() {
 	defer renderer.Destroy()
 
 	// Load font
-	fontPath := "/home/dev/nerd_font.ttf"   // Replace with your font file path
-	font, err := ttf.OpenFont(fontPath, 14) // 14 is the font size
+	fontPath := "/home/dev/nerd_font.ttf"
+	font, err := ttf.OpenFont(fontPath, 14)
 	if err != nil {
 		log.Fatalf("Could not load font: %v", err)
 	}
 	defer font.Close()
 
+	// Start text input
+	sdl.StartTextInput()
+	defer sdl.StopTextInput()
+
+	// Initialize PTY
 	os.Setenv("TERM", "dumb")
 	c := exec.Command("/bin/bash")
 	p, err := pty.Start(c)
-
 	if err != nil {
 		log.Fatalf("Could not start pty: %v", err)
-		os.Exit(1)
 	}
 
-	// Goroutine to handle event processing
-	quit := make(chan bool) // Channel to signal quitting the program
-	go func() {
-		for {
-			event := sdl.PollEvent()
-			if event != nil {
-				switch e := event.(type) {
-				case *sdl.QuitEvent:
-					quit <- true
-					return
-				case *sdl.KeyboardEvent:
-					handleKeyboardEvent(e, p)
-				}
-			}
-			time.Sleep(1 * time.Millisecond) // Prevent CPU overuse
-		}
-	}()
-
-	// Goroutine to read from PTY
+	// Goroutine to handle PTY output
 	go func() {
 		buf := make([]byte, 1024)
 		for {
@@ -101,84 +79,72 @@ func main() {
 				log.Fatalf("Error reading from PTY: %v", err)
 			}
 			output := string(buf[:n])
-			// Append only PTY output to the buffer
 			outputBuffer = append(outputBuffer, output)
 		}
 	}()
 
-	// Game loop
 	running := true
-
-	// Game loop rendering output
 	for running {
-		select {
-		case <-quit:
-			running = false
-			break
-		default:
-			renderer.SetDrawColor(0, 0, 0, 255) // Clear with black
-			renderer.Clear()
-
-			// Join the outputBuffer into a single string before rendering
-			joinedOutput := strings.Join(outputBuffer, "")
-
-			// Render the concatenated output
-			y := int32(0)
-			for _, line := range strings.Split(joinedOutput, "\n") {
-				textSurface, err := font.RenderUTF8Solid(line, sdl.Color{R: 255, G: 255, B: 255, A: 255})
-				if err != nil {
-					log.Printf("Error rendering text: %v", err)
-					continue
-				}
-				defer textSurface.Free()
-
-				textTexture, err := renderer.CreateTextureFromSurface(textSurface)
-				if err != nil {
-					log.Printf("Error creating texture: %v", err)
-					continue
-				}
-				defer textTexture.Destroy()
-
-				renderer.Copy(textTexture, nil, &sdl.Rect{X: 0, Y: y, W: textSurface.W, H: textSurface.H})
-				y += charHeight
+		for event := sdl.PollEvent(); event != nil; event = sdl.PollEvent() {
+			switch e := event.(type) {
+			case *sdl.QuitEvent:
+				running = false
+			case *sdl.TextInputEvent:
+				handleTextInputEvent(e, p)
+			case *sdl.KeyboardEvent:
+				handleSpecialKeys(e, p)
 			}
-
-			renderer.Present()
-			sdl.Delay(frameDelay)
 		}
+
+		renderer.SetDrawColor(0, 0, 0, 255)
+		renderer.Clear()
+
+		y := int32(0)
+		joinedOutput := strings.Join(outputBuffer, "")
+		for _, line := range strings.Split(joinedOutput, "\n") {
+			textSurface, err := font.RenderUTF8Solid(line, sdl.Color{R: 255, G: 255, B: 255, A: 255})
+			if err != nil {
+				log.Printf("Error rendering text: %v", err)
+				continue
+			}
+			defer textSurface.Free()
+
+			textTexture, err := renderer.CreateTextureFromSurface(textSurface)
+			if err != nil {
+				log.Printf("Error creating texture: %v", err)
+				continue
+			}
+			defer textTexture.Destroy()
+
+			renderer.Copy(textTexture, nil, &sdl.Rect{X: 0, Y: y, W: textSurface.W, H: textSurface.H})
+			y += charHeight
+		}
+
+		renderer.Present()
+		sdl.Delay(frameDelay)
 	}
 }
 
-// Handle keyboard events
-func handleKeyboardEvent(e *sdl.KeyboardEvent, p *os.File) {
+func handleTextInputEvent(e *sdl.TextInputEvent, p *os.File) {
+	text := e.GetText()
+	log.Printf("Text input: %s", text)
+	p.Write([]byte(text))
+}
+
+// handle backspace and enter cause its bullshit
+func handleSpecialKeys(e *sdl.KeyboardEvent, p *os.File) {
 	if e.Type == sdl.KEYDOWN {
-		char := e.Keysym.Sym
-
-		// Handle special keys like Enter and Backspace
-		switch char {
+		switch e.Keysym.Sym {
 		case sdl.K_RETURN:
-			// Send the Enter key (newline) to the PTY
 			p.Write([]byte{'\n'})
-
-			// Add a new line to the output buffer to simulate terminal behavior
 			outputBuffer = append(outputBuffer, "")
-
-			// Move cursor position down
-			cursorX = 0
-			cursorY += charHeight
 		case sdl.K_BACKSPACE:
-			if len(outputBuffer) > 0 && cursorX > 0 {
+			if len(outputBuffer) > 0 {
 				currentLine := outputBuffer[len(outputBuffer)-1]
 				if len(currentLine) > 0 {
 					outputBuffer[len(outputBuffer)-1] = currentLine[:len(currentLine)-1]
-					cursorX -= charWidth
 				}
 			}
-		default:
-			// Append printable characters to the PTY input buffer
-			p.Write([]byte{byte(char)})
-
-			// Do not add to outputBuffer immediately to avoid displaying multiple characters
 		}
 	}
 }

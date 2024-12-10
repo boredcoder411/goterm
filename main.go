@@ -5,7 +5,8 @@ import (
 	"os"
 	"os/exec"
 	"time"
-  "fmt"
+	//"fmt"
+	"strings"
 
 	"github.com/creack/pty"
 	"github.com/veandco/go-sdl2/sdl"
@@ -91,8 +92,6 @@ func main() {
 		}
 	}()
 
-	var outputBuffer []string
-
 	// Goroutine to read from PTY
 	go func() {
 		buf := make([]byte, 1024)
@@ -102,7 +101,7 @@ func main() {
 				log.Fatalf("Error reading from PTY: %v", err)
 			}
 			output := string(buf[:n])
-      fmt.Println([]byte(buf[:n]))
+			// Append only PTY output to the buffer
 			outputBuffer = append(outputBuffer, output)
 		}
 	}()
@@ -120,9 +119,12 @@ func main() {
 			renderer.SetDrawColor(0, 0, 0, 255) // Clear with black
 			renderer.Clear()
 
-			// Render PTY output line by line
+			// Join the outputBuffer into a single string before rendering
+			joinedOutput := strings.Join(outputBuffer, "")
+
+			// Render the concatenated output
 			y := int32(0)
-			for _, line := range outputBuffer {
+			for _, line := range strings.Split(joinedOutput, "\n") {
 				textSurface, err := font.RenderUTF8Solid(line, sdl.Color{R: 255, G: 255, B: 255, A: 255})
 				if err != nil {
 					log.Printf("Error rendering text: %v", err)
@@ -155,7 +157,13 @@ func handleKeyboardEvent(e *sdl.KeyboardEvent, p *os.File) {
 		// Handle special keys like Enter and Backspace
 		switch char {
 		case sdl.K_RETURN:
+			// Send the Enter key (newline) to the PTY
+			p.Write([]byte{'\n'})
+
+			// Add a new line to the output buffer to simulate terminal behavior
 			outputBuffer = append(outputBuffer, "")
+
+			// Move cursor position down
 			cursorX = 0
 			cursorY += charHeight
 		case sdl.K_BACKSPACE:
@@ -167,23 +175,11 @@ func handleKeyboardEvent(e *sdl.KeyboardEvent, p *os.File) {
 				}
 			}
 		default:
-			// Append printable characters
-			if len(outputBuffer) == 0 {
-				outputBuffer = append(outputBuffer, "")
-			}
-			lastLine := outputBuffer[len(outputBuffer)-1]
-			outputBuffer[len(outputBuffer)-1] = lastLine + string(char)
-			cursorX += charWidth
+			// Append printable characters to the PTY input buffer
+			p.Write([]byte{byte(char)})
 
-			// Wrap to a new line if needed
-			if cursorX >= screenWidth {
-				outputBuffer = append(outputBuffer, "")
-				cursorX = 0
-				cursorY += charHeight
-			}
+			// Do not add to outputBuffer immediately to avoid displaying multiple characters
 		}
-
-		// Write the character to the PTY
-		p.Write([]byte{byte(char)})
 	}
 }
+

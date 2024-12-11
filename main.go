@@ -4,7 +4,6 @@ import (
 	"log"
 	"os"
 	"os/exec"
-	"strings"
 
 	"github.com/creack/pty"
 	"github.com/leaanthony/go-ansi-parser"
@@ -19,21 +18,21 @@ const (
 )
 
 type Cursor struct {
-	X int32
-	Y int32
-  currentFgColor sdl.Color
-  currentBgColor sdl.Color
+	X              int32
+	Y              int32
+	currentFgColor sdl.Color
+	currentBgColor sdl.Color
 }
 
 var (
-	outputBuffer []string
+	outputBuffer []*ansi.StyledText
 	charWidth    int32 = 8
 	charHeight   int32 = 16
-  cursor       Cursor = Cursor{
-    X: 0,
-    Y: 0,
-    currentFgColor: sdl.Color{R: 255, G: 255, B: 255, A: 255},
-  }
+	cursor       Cursor = Cursor{
+		X: 0,
+		Y: 0,
+		currentFgColor: sdl.Color{R: 255, G: 255, B: 255, A: 255},
+	}
 )
 
 func main() {
@@ -90,8 +89,6 @@ func main() {
 				log.Fatalf("Error reading from PTY: %v", err)
 			}
 			handleAnsi(buf[:n])
-			output := string(buf[:n])
-			outputBuffer = append(outputBuffer, output)
 		}
 	}()
 
@@ -112,9 +109,18 @@ func main() {
 		renderer.Clear()
 
 		y := cursor.Y
-		joinedOutput := strings.Join(outputBuffer, "")
-		for _, line := range strings.Split(joinedOutput, "\n") {
-			textSurface, err := font.RenderUTF8Solid(line, sdl.Color{R: 255, G: 255, B: 255, A: 255})
+		for _, segment := range outputBuffer {
+			color := sdl.Color{R: 255, G: 255, B: 255, A: 255}
+			if segment.FgCol != nil {
+				color = sdl.Color{
+					R: segment.FgCol.Rgb.R,
+					G: segment.FgCol.Rgb.G,
+					B: segment.FgCol.Rgb.B,
+					A: 255,
+				}
+			}
+
+			textSurface, err := font.RenderUTF8Solid(segment.Label, color)
 			if err != nil {
 				log.Printf("Error rendering text: %v", err)
 				continue
@@ -164,15 +170,8 @@ func handleAnsi(buf []byte) {
 		return
 	}
 
-  for _, segment := range parsed {
-    if segment.FgCol != nil {
-      cursor.currentFgColor = sdl.Color {
-        R: segment.FgCol.Rgb.R,
-        G: segment.FgCol.Rgb.G,
-        B: segment.FgCol.Rgb.B,
-        A: 255,
-      }
-      log.Println("Setting fg color to", segment.FgCol.Name)
-    }
-  }
+	for _, segment := range parsed {
+		outputBuffer = append(outputBuffer, segment)
+	}
 }
+

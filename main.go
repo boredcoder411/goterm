@@ -7,9 +7,9 @@ import (
 	"strings"
 
 	"github.com/creack/pty"
+	"github.com/leaanthony/go-ansi-parser"
 	"github.com/veandco/go-sdl2/sdl"
 	"github.com/veandco/go-sdl2/ttf"
-  "github.com/leaanthony/go-ansi-parser"
 )
 
 const (
@@ -19,15 +19,21 @@ const (
 )
 
 type Cursor struct {
-  X int32
-  Y int32
+	X int32
+	Y int32
+  currentFgColor sdl.Color
+  currentBgColor sdl.Color
 }
 
 var (
 	outputBuffer []string
 	charWidth    int32 = 8
 	charHeight   int32 = 16
-  cursor       Cursor
+  cursor       Cursor = Cursor{
+    X: 0,
+    Y: 0,
+    currentFgColor: sdl.Color{R: 255, G: 255, B: 255, A: 255},
+  }
 )
 
 func main() {
@@ -83,7 +89,7 @@ func main() {
 			if err != nil {
 				log.Fatalf("Error reading from PTY: %v", err)
 			}
-      handleAnsi(buf[:n])
+			handleAnsi(buf[:n])
 			output := string(buf[:n])
 			outputBuffer = append(outputBuffer, output)
 		}
@@ -149,16 +155,24 @@ func handleSpecialKeys(e *sdl.KeyboardEvent, p *os.File) {
 }
 
 func handleAnsi(buf []byte) {
-  if len(buf) == 0 {
-    return
-  }
-  parsed, err := ansi.Parse(string(buf))
-  if err != nil {
-    log.Printf("Error parsing ANSI: %v", err)
-    log.Println(string(buf))
-    return
-  }
+	if len(buf) == 0 {
+		return
+	}
+	parsed, err := ansi.Parse(string(buf))
+	if err != nil {
+		log.Printf("Error parsing ANSI: %v\n  String was: %s", err, string(buf))
+		return
+	}
 
-  // show parsed
-  log.Printf("Parsed: %v", parsed)
+  for _, segment := range parsed {
+    if segment.FgCol != nil {
+      cursor.currentFgColor = sdl.Color {
+        R: segment.FgCol.Rgb.R,
+        G: segment.FgCol.Rgb.G,
+        B: segment.FgCol.Rgb.B,
+        A: 255,
+      }
+      log.Println("Setting fg color to", segment.FgCol.Name)
+    }
+  }
 }

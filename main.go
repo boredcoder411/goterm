@@ -9,6 +9,7 @@ import (
 	"github.com/creack/pty"
 	"github.com/veandco/go-sdl2/sdl"
 	"github.com/veandco/go-sdl2/ttf"
+  "github.com/leaanthony/go-ansi-parser"
 )
 
 const (
@@ -17,12 +18,16 @@ const (
 	frameDelay   = 16 // ~60 FPS (1000ms / 60)
 )
 
+type Cursor struct {
+  X int32
+  Y int32
+}
+
 var (
 	outputBuffer []string
-	cursorX      int32
-	cursorY      int32
 	charWidth    int32 = 8
 	charHeight   int32 = 16
+  cursor       Cursor
 )
 
 func main() {
@@ -63,7 +68,7 @@ func main() {
 	defer sdl.StopTextInput()
 
 	// Initialize PTY
-	os.Setenv("TERM", "dumb")
+	os.Setenv("TERM", "ansi")
 	c := exec.Command("/bin/bash")
 	p, err := pty.Start(c)
 	if err != nil {
@@ -78,6 +83,7 @@ func main() {
 			if err != nil {
 				log.Fatalf("Error reading from PTY: %v", err)
 			}
+      handleAnsi(buf[:n])
 			output := string(buf[:n])
 			outputBuffer = append(outputBuffer, output)
 		}
@@ -99,7 +105,7 @@ func main() {
 		renderer.SetDrawColor(0, 0, 0, 255)
 		renderer.Clear()
 
-		y := int32(0)
+		y := cursor.Y
 		joinedOutput := strings.Join(outputBuffer, "")
 		for _, line := range strings.Split(joinedOutput, "\n") {
 			textSurface, err := font.RenderUTF8Solid(line, sdl.Color{R: 255, G: 255, B: 255, A: 255})
@@ -127,7 +133,6 @@ func main() {
 
 func handleTextInputEvent(e *sdl.TextInputEvent, p *os.File) {
 	text := e.GetText()
-	log.Printf("Text input: %s", text)
 	p.Write([]byte(text))
 }
 
@@ -137,15 +142,23 @@ func handleSpecialKeys(e *sdl.KeyboardEvent, p *os.File) {
 		switch e.Keysym.Sym {
 		case sdl.K_RETURN:
 			p.Write([]byte{'\n'})
-			outputBuffer = append(outputBuffer, "")
 		case sdl.K_BACKSPACE:
-			if len(outputBuffer) > 0 {
-				currentLine := outputBuffer[len(outputBuffer)-1]
-				if len(currentLine) > 0 {
-					outputBuffer[len(outputBuffer)-1] = currentLine[:len(currentLine)-1]
-				}
-			}
+			p.Write([]byte{'\x7f'}) // Send DEL character to PTY
 		}
 	}
 }
 
+func handleAnsi(buf []byte) {
+  if len(buf) == 0 {
+    return
+  }
+  parsed, err := ansi.Parse(string(buf))
+  if err != nil {
+    log.Printf("Error parsing ANSI: %v", err)
+    log.Println(string(buf))
+    return
+  }
+
+  // show parsed
+  log.Printf("Parsed: %v", parsed)
+}

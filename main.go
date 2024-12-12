@@ -26,11 +26,11 @@ type Cursor struct {
 
 var (
 	outputBuffer []*ansi.StyledText
-	charWidth    int32 = 8
-	charHeight   int32 = 16
+	charWidth    int32  = 8
+	charHeight   int32  = 16
 	cursor       Cursor = Cursor{
-		X: 0,
-		Y: 0,
+		X:              0,
+		Y:              0,
 		currentFgColor: sdl.Color{R: 255, G: 255, B: 255, A: 255},
 	}
 )
@@ -109,6 +109,8 @@ func main() {
 		renderer.Clear()
 
 		y := cursor.Y
+		x := cursor.X // Track the X position for rendering characters within a line
+
 		for _, segment := range outputBuffer {
 			color := sdl.Color{R: 255, G: 255, B: 255, A: 255}
 			if segment.FgCol != nil {
@@ -120,22 +122,34 @@ func main() {
 				}
 			}
 
-			textSurface, err := font.RenderUTF8Solid(segment.Label, color)
-			if err != nil {
-				log.Printf("Error rendering text: %v", err)
-				continue
-			}
-			defer textSurface.Free()
+			// Render each character in the segment
+			for _, char := range segment.Label {
+				if char == '\n' {
+					x = 0           // Reset X position to the start of the line
+					y += charHeight // Move to the next line
+					continue
+				}
 
-			textTexture, err := renderer.CreateTextureFromSurface(textSurface)
-			if err != nil {
-				log.Printf("Error creating texture: %v", err)
-				continue
-			}
-			defer textTexture.Destroy()
+				charSurface, err := font.RenderUTF8Solid(string(char), color)
+				if err != nil {
+					log.Printf("Error rendering character: %v", err)
+					continue
+				}
+				defer charSurface.Free()
 
-			renderer.Copy(textTexture, nil, &sdl.Rect{X: 0, Y: y, W: textSurface.W, H: textSurface.H})
-			y += charHeight
+				charTexture, err := renderer.CreateTextureFromSurface(charSurface)
+				if err != nil {
+					log.Printf("Error creating texture: %v", err)
+					continue
+				}
+				defer charTexture.Destroy()
+
+				// Render the character at the current position
+				renderer.Copy(charTexture, nil, &sdl.Rect{X: x, Y: y, W: charSurface.W, H: charSurface.H})
+
+				// Advance the X position for the next character
+				x += charWidth
+			}
 		}
 
 		renderer.Present()
@@ -148,16 +162,23 @@ func handleTextInputEvent(e *sdl.TextInputEvent, p *os.File) {
 	p.Write([]byte(text))
 }
 
-// handle backspace and enter cause its bullshit
 func handleSpecialKeys(e *sdl.KeyboardEvent, p *os.File) {
-	if e.Type == sdl.KEYDOWN {
-		switch e.Keysym.Sym {
-		case sdl.K_RETURN:
-			p.Write([]byte{'\n'})
-		case sdl.K_BACKSPACE:
-			p.Write([]byte{'\x7f'}) // Send DEL character to PTY
-		}
-	}
+    if e.Type == sdl.KEYDOWN {
+        switch e.Keysym.Sym {
+        case sdl.K_RETURN:
+            p.Write([]byte{'\n'}) // Send the newline to the PTY
+
+            // Add a newline to the outputBuffer to render it immediately
+            outputBuffer = append(outputBuffer, &ansi.StyledText{
+                Label: "\n",
+                FgCol: &ansi.Col{
+                    Rgb: ansi.Rgb{R: 255, G: 255, B: 255},
+                },
+            })
+        case sdl.K_BACKSPACE:
+            p.Write([]byte{'\x7f'}) // Send DEL character to PTY
+        }
+    }
 }
 
 func handleAnsi(buf []byte) {
@@ -174,4 +195,3 @@ func handleAnsi(buf []byte) {
 		outputBuffer = append(outputBuffer, segment)
 	}
 }
-
